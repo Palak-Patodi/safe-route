@@ -8,8 +8,8 @@
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
-    <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.css" />
-    <script src="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.css" />
+    <script src="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.js"></script>
     <!-- Add a form submission service for SOS emails -->
     <script src="https://smtpjs.com/v3/smtp.js"></script>
 </head>
@@ -44,8 +44,15 @@
     </section>
 
     <section class="map-section">
-        <div id="safety-scores"></div>
-        <div id="map"></div>
+        <div class="map-layout">
+            <div id="map"></div>
+            <div class="map-info-panel">
+                <div id="safety-scores"></div>
+                <div id="route-directions">
+                    <p>Enter a start and destination above to see directions.</p>
+                </div>
+            </div>
+        </div>
     </section>
 
     <section class="reports-reviews">
