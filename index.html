@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Safe Route - Find the Safest Path</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.css" />
+    <script src="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.js"></script>
+    <!-- Add a form submission service for SOS emails -->
+    <script src="https://smtpjs.com/v3/smtp.js"></script>
+</head>
+<body>
+    <nav class="navbar">
+        <div class="logo">
+            <img src="logos.jpg" alt="Safe Route Logo" class="logo-img">
+            <h1>Safe Route</h1>
+        </div>
+        <ul class="nav-links">
+            <li><a href="index.html" id="home-link">Home</a></li>
+            <li><a href="login.html" id="login-link">Login</a></li>
+            <li><button id="logout-btn" style="display: none;">Logout</button></li>
+            <li><a href="delhi.html" id="delhi-link">Delhi Safety Planner</a></li>
+        </ul>
+    </nav>
+    <div class="moving-tagline">
+        <p>Your safety is not an option; it is our necessity.</p>
+    </div>
+    <section class="hero">
+        <div class="hero-text">
+            <h2 id="hero-title">Find the Safest Path</h2>
+            <p id="hero-description">Plan your journey with crime rate, public activity, and lighting information.</p>
+            <p id="user-greeting" style="font-size: 18px; font-weight: bold; color: #4CAF50;"></p> 
+        </div>
+
+        <div class="search-container">
+            <input type="text" id="start" placeholder="Start Point">
+            <input type="text" id="destination" placeholder="Destination">
+            <button class="btn" id="find-route-btn">Find Safe Route</button>
+        </div>
+    </section>
+
+    <section class="map-section">
+        <div id="safety-scores"></div>
+        <div id="map"></div>
+    </section>
+
+    <section class="reports-reviews">
+        <div class="report-section">
+            <h2>Report an Incident</h2>
+            <form id="report-form">
+                <label for="incident-type">Incident Type:</label>
+                <input type="text" id="incident-type" placeholder="Type of incident" required>
+                <label for="incident-location">Location (optional):</label>
+                <input type="text" id="incident-location" placeholder="Location (optional, auto-detected if empty)">
+                <label for="incident-description">Description:</label>
+                <textarea id="incident-description" placeholder="Description of the incident" required></textarea>
+                <button type="submit" class="btn">Submit Report</button>
+            </form>
+        </div>
+        
+        <div class="review-section">
+            <h2>Recent Reports</h2>
+            <ul id="report-list">
+                <li>
+                    <h3>Theft</h3>
+                    <p><strong>Location:</strong> Main Street</p>
+                    <p><strong>Description:</strong> A wallet was stolen from a parked car.</p>
+                    <p><strong>Date:</strong> September 7, 2024</p>
+                </li>
+                <li>
+                    <h3>Harassment</h3>
+                    <p><strong>Location:</strong> Elm Street</p>
+                    <p><strong>Description:</strong> Unusual behavior reported near the park.</p>
+                    <p><strong>Date:</strong> September 6, 2024</p>
+                </li>
+            </ul>
+        </div>
+    </section>
+
+    <!-- Self-Defense Section -->
+    <section class="self-defense-section">
+        <div class="video-container">
+            <h2>Self-Defense Video</h2>
+            <iframe width="100%" height="315" 
+    src="https://www.youtube.com/embed/KVpxP3ZZtAc" 
+    title="Self Defense Video" frameborder="0" allowfullscreen>
+</iframe>
+        </div>
+
+        <div class="tips-container">
+            <h2>Self Defense Tips</h2>
+            <ul>
+                <li>🔹 Stay aware of your surroundings.</li>
+                <li>🔹 Use your voice to call for help.</li>
+                <li>🔹 Aim for vulnerable areas (eyes, nose, face).</li>
+                <li>🔹 Keep a safe distance from strangers.</li>
+                <li>🔹 Carry a personal safety tool like a whistle or pepper spray.</li>
+            </ul>
+        </div>
+    </section>
+
+    <footer>
+        <p id="footer-text">&copy; 2025 Safe Route | Designed to keep you safe.</p>
+    </footer>
+
+    <script src="scripts.js"></script>
+
+    <script>
+        // Load user data from localStorage
+        document.addEventListener("DOMContentLoaded", function () {
+            const userName = localStorage.getItem("userName");
+            const userGreeting = document.getElementById("user-greeting");
+            const loginLink = document.getElementById("login-link");
+            const logoutBtn = document.getElementById("logout-btn");
+
+            if (userName) {
+                // Show greeting
+                userGreeting.textContent = `Welcome, ${userName}!`;
+                // Hide Login button
+                loginLink.style.display = "none";
+                // Show Logout button
+                logoutBtn.style.display = "inline-block";
+            }
+
+            // Logout Function
+            logoutBtn.addEventListener("click", async function () {
+                localStorage.setItem("forceLoggedOut", "true");
+                if (typeof window.firebaseLogout === "function") {
+                    await window.firebaseLogout();
+                    return;
+                }
+
+                // Fallback: if Firebase module is not ready, still clear local state
+                localStorage.removeItem("userName");
+                localStorage.removeItem("userEmail");
+                localStorage.removeItem("firebaseUid");
+                localStorage.removeItem("firebaseIdToken");
+                localStorage.removeItem("authVerified");
+                alert("You have logged out.");
+                window.location.href = "login.html";
+            });
+        });
+    </script>
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.0.0/firebase-app.js";
+        import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.0.0/firebase-auth.js";
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyBzvRISqxTBdriyd7FM0Gu4XcsxvotX5xg",
+            authDomain: "react-auth-app-b9b81.firebaseapp.com",
+            projectId: "react-auth-app-b9b81",
+            storageBucket: "react-auth-app-b9b81.appspot.com",
+            messagingSenderId: "921059190563",
+            appId: "1:921059190563:web:xxxxxxxxxxxxxxxxxx"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const defaultApiBase = (
+            window.location.protocol === "file:"
+            || (window.location.hostname === "localhost" && window.location.port && window.location.port !== "3000")
+        ) ? "http://localhost:3000" : "";
+        const apiBaseUrl = localStorage.getItem("apiBaseUrl") || defaultApiBase;
+
+        window.firebaseLogout = async function () {
+            try {
+                const token = localStorage.getItem("firebaseIdToken");
+                if (token) {
+                    await fetch(`${apiBaseUrl}/api/logout`, {
+                        method: "POST",
+                        headers: {
+                            "Authorization": `Bearer ${token}`
+                        }
+                    });
+                }
+                await signOut(auth);
+            } catch (error) {
+                console.warn("Firebase signOut warning:", error?.message || error);
+            }
+
+            localStorage.removeItem("userName");
+            localStorage.removeItem("userEmail");
+            localStorage.removeItem("firebaseUid");
+            localStorage.removeItem("firebaseIdToken");
+            localStorage.removeItem("authVerified");
+            alert("You have logged out.");
+            window.location.href = "login.html";
+        };
+
+        onAuthStateChanged(auth, async (user) => {
+            if (!user) {
+                localStorage.removeItem("userName");
+                localStorage.removeItem("userEmail");
+                localStorage.removeItem("firebaseUid");
+                localStorage.removeItem("firebaseIdToken");
+                localStorage.setItem("authVerified", "false");
+                return;
+            }
+
+            if (localStorage.getItem("forceLoggedOut") === "true") {
+                await signOut(auth);
+                return;
+            }
+
+            const token = await user.getIdToken(true);
+            localStorage.setItem("authVerified", "true");
+            localStorage.setItem("firebaseIdToken", token);
+            localStorage.setItem("firebaseUid", user.uid);
+            localStorage.setItem("userEmail", user.email || "");
+            if (!localStorage.getItem("userName") && user.email) {
+                localStorage.setItem("userName", user.email.split("@")[0]);
+            }
+        });
+    </script>
+<script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@3/dist/email.min.js"></script>
+</body>
+</html>

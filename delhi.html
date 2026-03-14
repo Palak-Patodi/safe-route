@@ -1,0 +1,735 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Safe Route - Delhi Safety Route Planner</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/leaflet.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/leaflet.css" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        
+        body {
+            background-color: #f5f7fa;
+            color: #333;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        header {
+            background-color: #3498db;
+            color: white;
+            padding: 20px 0;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+        
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .logo i {
+            font-size: 24px;
+        }
+        
+        h1 {
+            font-size: 1.8rem;
+            font-weight: 600;
+        }
+        
+        .app-container {
+            display: flex;
+            margin-top: 20px;
+            gap: 20px;
+            height: calc(100vh - 180px);
+        }
+        
+        .control-panel {
+            flex: 0 0 350px;
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .map-container {
+            flex: 1;
+            border-radius: 10px;
+            overflow: hidden;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            position: relative;
+        }
+        
+        #map {
+            width: 100%;
+            height: 100%;
+        }
+        
+        .form-group {
+            margin-bottom: 15px;
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 500;
+            color: #555;
+        }
+        
+        input, select {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 14px;
+            background-color: #f9f9f9;
+        }
+        
+        button {
+            background-color: #3498db;
+            color: white;
+            border: none;
+            padding: 12px 15px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: 500;
+            transition: background-color 0.3s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+        
+        button:hover {
+            background-color: #2980b9;
+        }
+        
+        .safety-info {
+            margin-top: auto;
+            padding-top: 15px;
+            border-top: 1px solid #eee;
+        }
+        
+        .safety-scale {
+            display: flex;
+            margin-top: 10px;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .scale-item {
+            text-align: center;
+            flex: 1;
+        }
+        
+        .color-box {
+            height: 20px;
+            margin-bottom: 5px;
+            border-radius: 3px;
+        }
+        
+        .scale-label {
+            font-size: 12px;
+            color: #777;
+        }
+        
+        .high-safety { background-color: #2ecc71; }
+        .medium-safety { background-color: #f1c40f; }
+        .low-safety { background-color: #e74c3c; }
+        
+        .route-info {
+            margin-top: 15px;
+            padding: 15px;
+            background-color: #f8f9fa;
+            border-radius: 5px;
+            border-left: 4px solid #3498db;
+        }
+        
+        .route-info h3 {
+            margin-bottom: 10px;
+            font-size: 16px;
+            color: #444;
+        }
+        
+        .info-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 8px;
+            font-size: 14px;
+        }
+        
+        .info-label {
+            color: #666;
+        }
+        
+        .info-value {
+            font-weight: 500;
+        }
+
+        .toggle-section {
+            margin-bottom: 15px;
+        }
+
+        .toggle-label {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            cursor: pointer;
+        }
+
+        .switch {
+            position: relative;
+            display: inline-block;
+            width: 50px;
+            height: 24px;
+        }
+
+        .switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #ccc;
+            transition: .4s;
+            border-radius: 24px;
+        }
+
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 18px;
+            width: 18px;
+            left: 3px;
+            bottom: 3px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+        }
+
+        input:checked + .slider {
+            background-color: #3498db;
+        }
+
+        input:checked + .slider:before {
+            transform: translateX(26px);
+        }
+        
+        /* Custom area label styling */
+        .area-label {
+            background-color: rgba(255, 255, 255, 0.8);
+            border: 1px solid #3498db;
+            border-radius: 4px;
+            padding: 3px 8px;
+            font-size: 12px;
+            font-weight: bold;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+            pointer-events: none;
+        }
+        
+        .area-label.high-safety {
+            border-color: #2ecc71;
+            border-left: 4px solid #2ecc71;
+        }
+        
+        .area-label.medium-safety {
+            border-color: #f1c40f;
+            border-left: 4px solid #f1c40f;
+        }
+        
+        .area-label.low-safety {
+            border-color: #e74c3c;
+            border-left: 4px solid #e74c3c;
+        }
+        
+        /* Toggle for area labels */
+        .options-panel {
+            margin-bottom: 15px;
+            padding-bottom: 15px;
+            border-bottom: 1px solid #eee;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="container">
+            <div class="logo">
+                <i class="fas fa-shield-alt"></i>
+                <h1>SafeRoute - Delhi Safety Route Planner</h1>
+            </div>
+        </div>
+    </header>
+
+    <div class="container">
+        <div class="app-container">
+            <div class="control-panel">
+                <div class="form-group">
+                    <label for="start">Starting Point</label>
+                    <input type="text" id="start" placeholder="Enter starting location" value="Connaught Place, Delhi">
+                </div>
+                <div class="form-group">
+                    <label for="destination">Destination</label>
+                    <input type="text" id="destination" placeholder="Enter destination" value="India Gate, Delhi">
+                </div>
+                <div class="form-group">
+                    <label for="time">Time of Travel</label>
+                    <select id="time">
+                        <option value="day">Day (6:00 AM - 6:00 PM)</option>
+                        <option value="night">Night (6:00 PM - 6:00 AM)</option>
+                    </select>
+                </div>
+
+                <div class="options-panel">
+                    <div class="toggle-section">
+                        <label class="toggle-label">
+                            Prioritize Safety
+                            <span class="switch">
+                                <input type="checkbox" id="safety-priority" checked>
+                                <span class="slider"></span>
+                            </span>
+                        </label>
+                    </div>
+                    <div class="toggle-section">
+                        <label class="toggle-label">
+                            Show Area Names
+                            <span class="switch">
+                                <input type="checkbox" id="show-area-names" checked>
+                                <span class="slider"></span>
+                            </span>
+                        </label>
+                    </div>
+                </div>
+
+                <button id="find-route"><i class="fas fa-search"></i> Find Safest Route</button>
+
+                <div id="route-details" class="route-info" style="display: none;">
+                    <h3>Route Information</h3>
+                    <div class="info-row">
+                        <span class="info-label">Distance:</span>
+                        <span class="info-value" id="route-distance">3.2 km</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Estimated Time:</span>
+                        <span class="info-value" id="route-time">12 mins</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Average Safety Score:</span>
+                        <span class="info-value" id="safety-score">8.2/10</span>
+                    </div>
+                </div>
+
+                <div class="safety-info">
+                    <label>Safety Levels:</label>
+                    <div class="safety-scale">
+                        <div class="scale-item">
+                            <div class="color-box high-safety"></div>
+                            <div class="scale-label">High</div>
+                        </div>
+                        <div class="scale-item">
+                            <div class="color-box medium-safety"></div>
+                            <div class="scale-label">Medium</div>
+                        </div>
+                        <div class="scale-item">
+                            <div class="color-box low-safety"></div>
+                            <div class="scale-label">Low</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="map-container">
+                <div id="map"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Safety data for Delhi areas (sample data)
+        const safetyData = {
+            // Central Delhi
+            "Connaught Place": { score: 8.5, coords: [28.6304, 77.2177] },
+            "India Gate": { score: 9.2, coords: [28.6127, 77.2295] },
+            "Janpath": { score: 8.7, coords: [28.6280, 77.2180] },
+            "Barakhamba": { score: 7.9, coords: [28.6320, 77.2240] },
+            "Mandi House": { score: 8.3, coords: [28.6230, 77.2260] },
+            "Pragati Maidan": { score: 7.6, coords: [28.6180, 77.2410] },
+            "ITO": { score: 7.0, coords: [28.6276, 77.2372] },
+            "Delhi Gate": { score: 6.2, coords: [28.6400, 77.2380] },
+            "Raj Ghat": { score: 7.8, coords: [28.6400, 77.2500] },
+            "Red Fort": { score: 6.9, coords: [28.6562, 77.2410] },
+            
+            // South Delhi
+            "Lajpat Nagar": { score: 7.2, coords: [28.5700, 77.2372] },
+            "Defence Colony": { score: 8.6, coords: [28.5750, 77.2260] },
+            "South Extension": { score: 8.0, coords: [28.5710, 77.2200] },
+            "Green Park": { score: 8.4, coords: [28.5589, 77.2069] },
+            "Hauz Khas": { score: 7.8, coords: [28.5530, 77.2060] },
+            "Saket": { score: 7.4, coords: [28.5240, 77.2100] },
+            "Mehrauli": { score: 6.1, coords: [28.5230, 77.1810] },
+            "Vasant Kunj": { score: 8.2, coords: [28.5220, 77.1580] },
+            "Vasant Vihar": { score: 8.8, coords: [28.5560, 77.1600] },
+            
+            // North Delhi
+            "Civil Lines": { score: 7.3, coords: [28.6800, 77.2200] },
+            "Kashmere Gate": { score: 6.4, coords: [28.6671, 77.2303] },
+            "University": { score: 7.9, coords: [28.6900, 77.2090] },
+            "Chandni Chowk": { score: 5.8, coords: [28.6500, 77.2300] },
+            "Sadar Bazaar": { score: 5.5, coords: [28.6550, 77.2100] },
+            
+            // East Delhi
+            "Laxmi Nagar": { score: 6.0, coords: [28.6320, 77.2780] },
+            "Preet Vihar": { score: 6.5, coords: [28.6420, 77.2930] },
+            "Anand Vihar": { score: 6.8, coords: [28.6470, 77.3100] },
+            "Shahdara": { score: 5.7, coords: [28.6720, 77.2920] },
+            "Patparganj": { score: 6.6, coords: [28.6280, 77.2890] },
+            
+            // West Delhi
+            "Rajouri Garden": { score: 7.0, coords: [28.6520, 77.1220] },
+            "Punjabi Bagh": { score: 6.9, coords: [28.6720, 77.1300] },
+            "Paschim Vihar": { score: 7.1, coords: [28.6750, 77.1100] },
+            "Janakpuri": { score: 7.3, coords: [28.6300, 77.0790] },
+            "Dwarka": { score: 7.8, coords: [28.5950, 77.0520] }
+        };
+
+        // Street-level safety data (sample) - Real implementation would have more granular data
+        const streetSafetyData = [
+            {
+                name: "Rajpath (CP to India Gate)",
+                coordinates: [
+                    [28.6304, 77.2177], // CP
+                    [28.6290, 77.2210],
+                    [28.6275, 77.2260],
+                    [28.6260, 77.2310],
+                    [28.6245, 77.2360],
+                    [28.6230, 77.2410],
+                    [28.6127, 77.2295]  // India Gate
+                ],
+                safetyScores: [8.5, 8.7, 9.0, 9.1, 8.9, 9.0, 9.2]
+            },
+            {
+                name: "Janpath to India Gate",
+                coordinates: [
+                    [28.6304, 77.2177], // CP
+                    [28.6250, 77.2180],
+                    [28.6200, 77.2183],
+                    [28.6170, 77.2210],
+                    [28.6150, 77.2250],
+                    [28.6127, 77.2295]  // India Gate
+                ],
+                safetyScores: [8.5, 8.2, 7.8, 7.6, 8.4, 9.2]
+            },
+            {
+                name: "CP to India Gate via Mandi House",
+                coordinates: [
+                    [28.6304, 77.2177], // CP
+                    [28.6280, 77.2240],
+                    [28.6230, 77.2260], // Mandi House
+                    [28.6180, 77.2280],
+                    [28.6127, 77.2295]  // India Gate
+                ],
+                safetyScores: [8.5, 8.2, 8.3, 8.7, 9.2]
+            },
+            {
+                name: "CP to Rajghat",
+                coordinates: [
+                    [28.6304, 77.2177], // CP
+                    [28.6280, 77.2240],
+                    [28.6230, 77.2300],
+                    [28.6180, 77.2350],
+                    [28.6400, 77.2500]  // Rajghat
+                ],
+                safetyScores: [8.5, 7.9, 7.2, 6.6, 7.8]
+            }
+        ];
+
+        // Initialize map
+        let map = L.map('map').setView([28.6139, 77.2090], 13);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+        }).addTo(map);
+
+        // Variables to store routes and area labels
+        let currentRoutes = [];
+        let routeLines = [];
+        let areaLabels = [];
+
+        // Event listeners
+        document.getElementById('find-route').addEventListener('click', function() {
+            // Clear previous routes
+            routeLines.forEach(line => map.removeLayer(line));
+            routeLines = [];
+            
+            const startPoint = document.getElementById('start').value;
+            const endPoint = document.getElementById('destination').value;
+            const timeOfDay = document.getElementById('time').value;
+            const prioritizeSafety = document.getElementById('safety-priority').checked;
+            
+            // Find matching routes
+            findAndDisplayRoutes(startPoint, endPoint, timeOfDay, prioritizeSafety);
+        });
+        
+        document.getElementById('show-area-names').addEventListener('change', function() {
+            toggleAreaLabels(this.checked);
+        });
+
+        // Function to add area labels to the map
+        function addAreaLabels() {
+            // Remove existing labels first
+            areaLabels.forEach(label => map.removeLayer(label));
+            areaLabels = [];
+            
+            // Add labels for each area
+            for (const [areaName, areaData] of Object.entries(safetyData)) {
+                const { score, coords } = areaData;
+                
+                // Create a custom div icon with safety color indicator
+                let safetyClass = '';
+                if (score >= 8) {
+                    safetyClass = 'high-safety';
+                } else if (score >= 6) {
+                    safetyClass = 'medium-safety';
+                } else {
+                    safetyClass = 'low-safety';
+                }
+                
+                const labelIcon = L.divIcon({
+                    className: `area-label ${safetyClass}`,
+                    html: `<div>${areaName} (${score.toFixed(1)})</div>`,
+                    iconSize: null
+                });
+                
+                // Create marker with the custom icon
+                const marker = L.marker(coords, {
+                    icon: labelIcon,
+                    interactive: false // To prevent clicking on the label
+                }).addTo(map);
+                
+                areaLabels.push(marker);
+            }
+        }
+        
+        // Function to toggle area labels visibility
+        function toggleAreaLabels(show) {
+            if (show) {
+                addAreaLabels();
+            } else {
+                areaLabels.forEach(label => map.removeLayer(label));
+                areaLabels = [];
+            }
+        }
+
+        function findAndDisplayRoutes(start, end, time, prioritizeSafety) {
+            // Reset display
+            document.getElementById('route-details').style.display = 'none';
+            
+            // Simple route matching - in a real app you'd use routing APIs
+            let matchingRoutes = [];
+            
+            // For demo, we'll check if any of our sample routes match the desired points
+            for (let route of streetSafetyData) {
+                const routeStartName = getAreaNameFromCoordinates(route.coordinates[0]);
+                const routeEndName = getAreaNameFromCoordinates(route.coordinates[route.coordinates.length - 1]);
+                
+                // Basic matching for demo purposes
+                if ((routeStartName.toLowerCase().includes(start.toLowerCase()) || 
+                     start.toLowerCase().includes(routeStartName.toLowerCase())) && 
+                    (routeEndName.toLowerCase().includes(end.toLowerCase()) || 
+                     end.toLowerCase().includes(routeEndName.toLowerCase()))) {
+                    matchingRoutes.push(route);
+                }
+            }
+            
+            // If no direct routes found, try to find routes that can be connected
+            if (matchingRoutes.length === 0) {
+                // For demo, we'll just show a mock route
+                const mockRoute = {
+                    name: `${start} to ${end}`,
+                    coordinates: [
+                        [28.6304, 77.2177], // CP
+                        [28.6250, 77.2210],
+                        [28.6200, 77.2250],
+                        [28.6127, 77.2295]  // India Gate
+                    ],
+                    safetyScores: [8.5, 7.9, 8.2, 9.2]
+                };
+                matchingRoutes.push(mockRoute);
+            }
+           
+
+            // Adjust safety scores for time of day
+            if (time === 'night') {
+                matchingRoutes.forEach(route => {
+                    route.safetyScores = route.safetyScores.map(score => {
+                        // Reduce safety scores by 10-20% at night (more for lower safety areas)
+                        const reduction = 0.1 + (0.1 * (10 - score) / 5);
+                        return Math.max(1, score * (1 - reduction));
+                    });
+                });
+            }
+            
+            // Choose the best route based on criteria
+            let bestRoute;
+            if (prioritizeSafety) {
+                // Choose the route with highest average safety score
+                bestRoute = matchingRoutes.reduce((best, current) => {
+                    const currentAvgScore = current.safetyScores.reduce((sum, score) => sum + score, 0) / current.safetyScores.length;
+                    const bestAvgScore = best ? best.safetyScores.reduce((sum, score) => sum + score, 0) / best.safetyScores.length : 0;
+                    return currentAvgScore > bestAvgScore ? current : best;
+                }, null);
+            } else {
+                // Choose the shortest route (using simple distance heuristic)
+                bestRoute = matchingRoutes.reduce((best, current) => {
+                    return current.coordinates.length < (best ? best.coordinates.length : Infinity) ? current : best;
+                }, null);
+            }
+            
+            if (bestRoute) {
+                displayRoute(bestRoute);
+                updateRouteInfo(bestRoute);
+            }
+        }
+
+        function displayRoute(route) {
+            // Create a polyline with color based on safety scores
+            for (let i = 0; i < route.coordinates.length - 1; i++) {
+                const segment = [route.coordinates[i], route.coordinates[i + 1]];
+                const safetyScore = route.safetyScores[i];
+                
+                // Determine color based on safety score
+                let color;
+                if (safetyScore >= 8) {
+                    color = '#2ecc71'; // High safety - green
+                } else if (safetyScore >= 6) {
+                    color = '#f1c40f'; // Medium safety - yellow
+                } else {
+                    color = '#e74c3c'; // Low safety - red
+                }
+                
+                // Create polyline and add to map
+                const polyline = L.polyline(segment, {
+                    color: color,
+                    weight: 5,
+                    opacity: 0.8
+                }).addTo(map);
+                
+                // Add popup with safety info
+                polyline.bindPopup(`Safety Score: ${safetyScore.toFixed(1)}/10`);
+                
+                routeLines.push(polyline);
+            }
+            
+            // Fit the map to show the route
+            const bounds = L.latLngBounds(route.coordinates);
+            map.fitBounds(bounds, { padding: [50, 50] });
+            
+            // Add markers for start and end
+            L.marker(route.coordinates[0]).addTo(map)
+                .bindPopup('Starting Point: ' + getAreaNameFromCoordinates(route.coordinates[0]))
+                .openPopup();
+            
+            L.marker(route.coordinates[route.coordinates.length - 1]).addTo(map)
+                .bindPopup('Destination: ' + getAreaNameFromCoordinates(route.coordinates[route.coordinates.length - 1]));
+            
+            // Store current route
+            currentRoutes = [route];
+        }
+
+        function updateRouteInfo(route) {
+            // Calculate average safety score
+            const avgSafetyScore = route.safetyScores.reduce((sum, score) => sum + score, 0) / route.safetyScores.length;
+            
+            // Calculate approximate distance (very simple)
+            let distance = 0;
+            for (let i = 0; i < route.coordinates.length - 1; i++) {
+                distance += calculateDistance(
+                    route.coordinates[i][0], route.coordinates[i][1],
+                    route.coordinates[i+1][0], route.coordinates[i+1][1]
+                );
+            }
+            
+            // Calculate estimated time (assuming 4 km/h walking speed)
+            const timeInMinutes = Math.round(distance / 4 * 60);
+            
+            // Update UI
+            document.getElementById('route-distance').textContent = `${distance.toFixed(1)} km`;
+            document.getElementById('route-time').textContent = `${timeInMinutes} mins`;
+            document.getElementById('safety-score').textContent = `${avgSafetyScore.toFixed(1)}/10`;
+            document.getElementById('route-details').style.display = 'block';
+        }
+        
+        // Helper functions
+        function calculateDistance(lat1, lon1, lat2, lon2) {
+            // Simple distance calculation (not entirely accurate but sufficient for demo)
+            const R = 6371; // Radius of the earth in km
+            const dLat = deg2rad(lat2 - lat1);
+            const dLon = deg2rad(lon2 - lon1);
+            const a =
+                Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+                Math.cos(deg2rad(lat1)) * Math.cos(deg2rad(lat2)) *
+                Math.sin(dLon / 2) * Math.sin(dLon / 2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+            return R * c;
+        }
+        
+        function deg2rad(deg) {
+            return deg * (Math.PI / 180);
+        }
+        
+        function getAreaNameFromCoordinates(coords) {
+            // Find closest area by distance
+            let closestArea = null;
+            let minDistance = Infinity;
+            
+            for (const [areaName, areaData] of Object.entries(safetyData)) {
+                const distance = calculateDistance(
+                    coords[0], coords[1],
+                    areaData.coords[0], areaData.coords[1]
+                );
+                
+                if (distance < minDistance) {
+                    minDistance = distance;
+                    closestArea = areaName;
+                }
+            }
+            
+            // If we're within a reasonable distance (0.5km), return the area name
+            if (minDistance < 0.5 && closestArea) {
+                return closestArea;
+            }
+            
+            return "Unknown Area";
+        }
+        
+        // Initialize with area labels and default route
+        setTimeout(() => {
+            // Add area labels initially if checkbox is checked
+            if (document.getElementById('show-area-names').checked) {
+                addAreaLabels();
+            }
+            
+            // Find default route
+            document.getElementById('find-route').click();
+        }, 500);
+    </script>
+</body>
+</html>

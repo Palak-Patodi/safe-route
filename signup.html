@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Signup - Safe Route</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="logo">
+            <h1 id="site-title">Safe Route</h1>
+        </div>
+        <ul class="nav-links">
+            <li><a href="index.html">Home</a></li>
+            <li><a href="login.html">Login</a></li>
+        </ul>
+    </nav>
+
+    <section class="signup-content">
+        <div class="signup-container">
+            <h2>Create an Account</h2>
+            <form id="signup-form">
+                <div class="form-group">
+                    <label for="signup-name">Username:</label>
+                    <input type="text" id="signup-name" placeholder="Enter your username" required>
+                </div>
+                <div class="form-group">
+                    <label for="signup-email">Email:</label>
+                    <input type="email" id="signup-email" placeholder="Enter your email" required>
+                </div>
+                <div class="form-group">
+                    <label for="signup-password">Password:</label>
+                    <input type="password" id="signup-password" placeholder="Enter your password" required>
+                </div>
+                <div class="form-group">
+                    <label for="confirm-password">Confirm Password:</label>
+                    <input type="password" id="confirm-password" placeholder="Confirm your password" required>
+                </div>
+                <button type="submit" class="btn">Sign Up</button>
+            </form>
+            <p>Already have an account? <a href="login.html">Login here</a></p>
+            <p id="signup-error" class="error"></p>
+        </div>
+    </section>
+
+    <footer>
+        <p>&copy; 2024 Mahila Suraksha | Designed to keep you safe.</p>
+    </footer>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.0.0/firebase-app.js";
+        import { getAuth, createUserWithEmailAndPassword } from "https://www.gstatic.com/firebasejs/10.0.0/firebase-auth.js";
+    
+        // Firebase Configuration
+        const firebaseConfig = {
+            apiKey: "AIzaSyBzvRISqxTBdriyd7FM0Gu4XcsxvotX5xg",
+            authDomain: "react-auth-app-b9b81.firebaseapp.com",
+            projectId: "react-auth-app-b9b81",
+            storageBucket: "react-auth-app-b9b81.appspot.com",
+            messagingSenderId: "921059190563",
+            appId: "1:921059190563:web:xxxxxxxxxxxxxxxxxx"
+        };
+    
+        document.addEventListener("DOMContentLoaded", function () {
+            const app = initializeApp(firebaseConfig);
+            const auth = getAuth(app);
+
+            const signupForm = document.getElementById("signup-form");
+            if (signupForm) {
+                signupForm.addEventListener("submit", async function (e) {
+                    e.preventDefault();
+
+                    const userName = document.getElementById("signup-name").value.trim();
+                    let email = document.getElementById("signup-email").value.trim();
+                    let password = document.getElementById("signup-password").value.trim();
+                    let confirmPassword = document.getElementById("confirm-password").value.trim();
+                    let errorElement = document.getElementById("signup-error");
+
+                    errorElement.innerHTML = "";
+
+                    if (!userName) {
+                        errorElement.innerHTML = "Username is required.";
+                        return;
+                    }
+
+                    if (!validateEmail(email)) {
+                        errorElement.innerHTML = "Invalid email format.";
+                        return;
+                    }
+
+                    if (password.length < 6) {
+                        errorElement.innerHTML = "Password must be at least 6 characters long.";
+                        return;
+                    }
+
+                    if (password !== confirmPassword) {
+                        errorElement.innerHTML = "Passwords do not match.";
+                        return;
+                    }
+
+                    try {
+                        await createUserWithEmailAndPassword(auth, email, password);
+                        localStorage.setItem("userName", userName);
+                        localStorage.setItem("userEmail", email);
+                        alert("Signup successful! Redirecting to login.");
+                        window.location.href = "login.html";
+                    } catch (error) {
+                        errorElement.innerHTML = `Error: ${error.message}`;
+                    }
+                });
+            }
+        });
+
+        function validateEmail(email) {
+            const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+            return emailRegex.test(email);
+        }
+    </script>
+</body>
+</html>
