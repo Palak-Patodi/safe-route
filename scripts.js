@@ -12,6 +12,9 @@ let allFetchedReports = [];
 let renderedReportCount = 0;
 const REPORT_BATCH_SIZE = 5;
 const REPORT_FETCH_LIMIT = 50;
+const ROUTE_PERSIST_MS = 10 * 60 * 1000;
+let routeLayerGroup;
+let routeClearTimeout = null;
 
 // Use absolute URL whenever the page is NOT served by our own port-3000 server
 const DEFAULT_API_BASE = (
@@ -26,6 +29,124 @@ function apiUrl(path) {
 
 function getAuthToken() {
   return localStorage.getItem('firebaseIdToken');
+}
+
+function formatDuration(seconds) {
+  const totalMinutes = Math.round(seconds / 60);
+  if (totalMinutes < 60) {
+    return `${totalMinutes} min`;
+  }
+
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return minutes ? `${hours} hr ${minutes} min` : `${hours} hr`;
+}
+
+function formatDistance(meters) {
+  if (meters < 1000) {
+    return `${Math.round(meters)} m`;
+  }
+
+  return `${(meters / 1000).toFixed(1)} km`;
+}
+
+function resetRouteExpiry() {
+  if (routeClearTimeout) {
+    clearTimeout(routeClearTimeout);
+  }
+
+  routeClearTimeout = setTimeout(() => {
+    clearPersistedRoute();
+  }, ROUTE_PERSIST_MS);
+}
+
+function clearPersistedRoute() {
+  routeActive = false;
+
+  if (routeClearTimeout) {
+    clearTimeout(routeClearTimeout);
+    routeClearTimeout = null;
+  }
+
+  if (routeLayerGroup) {
+    routeLayerGroup.clearLayers();
+  }
+
+  if (routingControl) {
+    routingControl.setWaypoints([]);
+  }
+
+  if (startRouteMarker && map) {
+    map.removeLayer(startRouteMarker);
+    startRouteMarker = null;
+  }
+
+  if (endRouteMarker && map) {
+    map.removeLayer(endRouteMarker);
+    endRouteMarker = null;
+  }
+
+  const safetyScoresElement = document.getElementById('safety-scores');
+  if (safetyScoresElement) {
+    safetyScoresElement.innerHTML = '';
+  }
+
+  const directionsEl = document.getElementById('route-directions');
+  if (directionsEl) {
+    directionsEl.innerHTML = '<p>Enter a start and destination above to see directions.</p>';
+  }
+}
+
+function renderRouteDirections(route) {
+  const el = document.getElementById('route-directions');
+  if (!el) {
+    return;
+  }
+
+  const steps = Array.isArray(route.instructions) ? route.instructions : [];
+  const summary = route.summary || {};
+
+  const stepsHtml = steps.length
+    ? `<ol>${steps.map((s) => `<li>${s.text}<span class="step-dist">${formatDistance(s.distance || 0)}</span></li>`).join('')}</ol>`
+    : '<p>Route found — no turn-by-turn steps available.</p>';
+
+  el.innerHTML = `
+    <h3>Directions</h3>
+    <div class="route-summary">
+      <span>${formatDistance(summary.totalDistance || 0)}</span>
+      <span>${formatDuration(summary.totalTime || 0)}</span>
+    </div>
+    ${stepsHtml}
+  `;
+}
+
+function drawPersistentRoute(route) {
+  if (!map || !routeLayerGroup) {
+    return;
+  }
+
+  routeLayerGroup.clearLayers();
+
+  const latLngs = (route.coordinates || []).map((point) => [point.lat, point.lng]);
+  if (!latLngs.length) {
+    return;
+  }
+
+  L.polyline(latLngs, {
+    color: '#ff9f43',
+    weight: 14,
+    opacity: 0.28,
+    lineJoin: 'round'
+  }).addTo(routeLayerGroup);
+
+  L.polyline(latLngs, {
+    color: '#2980b9',
+    weight: 6,
+    opacity: 0.95,
+    lineJoin: 'round'
+  }).addTo(routeLayerGroup);
+
+  resetRouteExpiry();
 }
 
 function isVerifiedUserLoggedIn() {
@@ -122,52 +243,79 @@ async function loadRecentReports() {
   }
 }
 
+function decodePolyline(str, precision) {
+  const factor = Math.pow(10, precision || 6);
+  const len = str.length;
+  const result = [];
+  let index = 0, lat = 0, lng = 0;
+  while (index < len) {
+    let b, shift = 0, res = 0;
+    do { b = str.charCodeAt(index++) - 63; res |= (b & 0x1f) << shift; shift += 5; } while (b >= 0x20);
+    lat += (res & 1) ? ~(res >> 1) : (res >> 1);
+    shift = 0; res = 0;
+    do { b = str.charCodeAt(index++) - 63; res |= (b & 0x1f) << shift; shift += 5; } while (b >= 0x20);
+    lng += (res & 1) ? ~(res >> 1) : (res >> 1);
+    result.push(L.latLng(lat / factor, lng / factor));
+  }
+  return result;
+}
+
+async function fetchOSRMRoute(startLatLng, endLatLng) {
+  const resp = await fetch('https://valhalla1.openstreetmap.de/route', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      locations: [
+        { lat: startLatLng.lat, lon: startLatLng.lng },
+        { lat: endLatLng.lat, lon: endLatLng.lng }
+      ],
+      costing: 'auto',
+      directions_options: { units: 'kilometers' }
+    })
+  });
+  if (!resp.ok) throw new Error(`Router returned ${resp.status}`);
+  const data = await resp.json();
+  if (!data.trip) throw new Error('No route found');
+  return data.trip;
+}
+
+function applyOSRMRoute(trip, startLatLng, endLatLng) {
+  const coords = decodePolyline(trip.legs[0].shape);
+  drawPersistentRoute({ coordinates: coords });
+  if (coords.length > 1) {
+    map.fitBounds(L.latLngBounds(coords), { padding: [30, 30] });
+  }
+  const maneuvers = trip.legs[0].maneuvers || [];
+  const instructions = maneuvers.map((m) => ({
+    text: m.instruction,
+    distance: (m.length || 0) * 1000
+  }));
+  renderRouteDirections({
+    summary: {
+      totalDistance: (trip.summary.length || 0) * 1000,
+      totalTime: trip.summary.time || 0
+    },
+    instructions
+  });
+}
+
 function initMap() {
   if (!document.getElementById('map')) {
     return;
   }
 
   map = L.map('map').setView([28.6139, 77.209], 13);
+  routeLayerGroup = L.layerGroup().addTo(map);
 
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     attribution: '&copy; OpenStreetMap contributors'
   }).addTo(map);
 
-  routingControl = L.Routing.control({
-    waypoints: [],
-    routeWhileDragging: true
-  }).addTo(map);
-
-  routingControl.on('routesfound', (event) => {
-    if (!event.routes || !event.routes.length) {
-      return;
-    }
-
-    routeActive = true;
-
-    const coordinates = event.routes[0].coordinates || [];
-    if (coordinates.length > 1) {
-      const bounds = L.latLngBounds(coordinates);
-      map.fitBounds(bounds, { padding: [30, 30] });
-    }
-  });
-
-  addPanControls();
-}
-
-function addPanControls() {
-  const panControls = document.createElement('div');
-  panControls.innerHTML = `
-    <div id="pan-controls" style="position: fixed; bottom: 30px; left: 30px; z-index: 1000; display: flex; flex-direction: column; align-items: center;">
-      <button onclick="panMap(0, -0.05)" style="margin-bottom: 5px;">⬅️</button>
-      <div style="display: flex;">
-        <button onclick="panMap(-0.05, 0)" style="margin-right: 5px;">⬇️</button>
-        <button onclick="panMap(0.05, 0)">⬆️</button>
-      </div>
-      <button onclick="panMap(0, 0.05)" style="margin-top: 5px;">➡️</button>
-    </div>
-  `;
-  document.body.appendChild(panControls);
+  // routingControl is kept only so existing code that calls setWaypoints/clearWaypoints still works
+  routingControl = {
+    setWaypoints: () => {},
+    getPlan: () => ({ setWaypoints: () => {} })
+  };
 }
 
 function setupFamilyContactModal() {
@@ -434,44 +582,55 @@ function findRoute() {
   const destination = destinationElement.value;
 
   if (!destination) {
+    clearPersistedRoute();
     alert('Please enter a destination.');
     return;
   }
 
-  const processRoute = (startCoords, endCoords) => {
+  const directionsEl = document.getElementById('route-directions');
+  if (directionsEl) {
+    directionsEl.innerHTML = '<p>Calculating route…</p>';
+  }
+
+  const processRoute = async (startCoords, endCoords) => {
     routeActive = true;
+    resetRouteExpiry();
 
-    routingControl.setWaypoints([
-      L.latLng(startCoords[0], startCoords[1]),
-      L.latLng(endCoords[0], endCoords[1])
-    ]);
+    if (startRouteMarker) { map.removeLayer(startRouteMarker); }
+    if (endRouteMarker) { map.removeLayer(endRouteMarker); }
+    startRouteMarker = L.marker(startCoords).addTo(map).bindPopup('Start');
+    endRouteMarker = L.marker(endCoords).addTo(map).bindPopup('Destination');
 
-    const routeBounds = L.latLngBounds([
-      L.latLng(startCoords[0], startCoords[1]),
-      L.latLng(endCoords[0], endCoords[1])
-    ]);
-    map.fitBounds(routeBounds.pad(0.3));
-
-    // Make route changes obvious by marking current start and destination.
-    if (startRouteMarker) {
-      map.removeLayer(startRouteMarker);
-    }
-    if (endRouteMarker) {
-      map.removeLayer(endRouteMarker);
-    }
-    startRouteMarker = L.marker([startCoords[0], startCoords[1]]).addTo(map)
-      .bindPopup('Start point');
-    endRouteMarker = L.marker([endCoords[0], endCoords[1]]).addTo(map)
-      .bindPopup('Destination');
+    // Fit map to show both markers while route loads
+    map.fitBounds(L.latLngBounds([startCoords, endCoords]).pad(0.3));
 
     addHotspots();
 
     if (safetyScoresElement) {
-      getSafetyScore(startCoords[0], startCoords[1], (startSafetyScore) => {
-        getSafetyScore(endCoords[0], endCoords[1], (endSafetyScore) => {
-          safetyScoresElement.innerHTML = `Safety Score for Start: ${startSafetyScore.toFixed(2)}<br>Safety Score for Destination: ${endSafetyScore.toFixed(2)}`;
+      getSafetyScore(startCoords[0], startCoords[1], (startScore) => {
+        getSafetyScore(endCoords[0], endCoords[1], (endScore) => {
+          safetyScoresElement.innerHTML =
+            `Safety Score for Start: ${startScore.toFixed(2)}<br>Safety Score for Destination: ${endScore.toFixed(2)}`;
         });
       });
+    }
+
+    try {
+      const osrmRoute = await fetchOSRMRoute(
+        L.latLng(startCoords[0], startCoords[1]),
+        L.latLng(endCoords[0], endCoords[1])
+      );
+      applyOSRMRoute(
+        osrmRoute,
+        L.latLng(startCoords[0], startCoords[1]),
+        L.latLng(endCoords[0], endCoords[1])
+      );
+    } catch (err) {
+      console.error('Routing failed:', err);
+      const el = document.getElementById('route-directions');
+      if (el) {
+        el.innerHTML = `<p style="color:red;">Could not calculate route: ${err.message}.<br>Check your internet connection and try again.</p>`;
+      }
     }
   };
 
@@ -480,6 +639,7 @@ function findRoute() {
       if (currentLiveLocation) {
         processRoute([currentLiveLocation.lat, currentLiveLocation.lng], endCoords);
       } else {
+        clearPersistedRoute();
         alert('Live location not available yet. Please wait or enter a start location.');
       }
     } else {
