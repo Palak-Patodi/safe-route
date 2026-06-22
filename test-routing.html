@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Route Testing Tool</title>
+    <style>
+        body { font-family: Arial; margin: 20px; }
+        .test { border: 1px solid #ccc; padding: 15px; margin: 10px 0; }
+        .success { background: #d4edda; }
+        .error { background: #f8d7da; }
+        button { padding: 8px 15px; margin: 5px; cursor: pointer; }
+        pre { background: #f5f5f5; padding: 10px; overflow: auto; }
+        input { width: 300px; padding: 5px; margin: 5px 0; }
+    </style>
+</head>
+<body>
+    <h1>Route Testing Diagnostic Tool</h1>
+    
+    <div class="test">
+        <h2>Test Locations</h2>
+        <p>
+            <input type="text" id="startInput" placeholder="Start location" value="Faridabad main market">
+            <input type="text" id="endInput" placeholder="End location" value="Cyber City, Gurgaon">
+            <button onclick="testRoute()">Test Route</button>
+        </p>
+    </div>
+    
+    <div class="test">
+        <h2>Geocoding Test</h2>
+        <p>
+            <input type="text" id="geoInput" placeholder="Address to geocode" value="Cyber City, Gurgaon">
+            <button onclick="testGeocoding()">Geocode Address</button>
+        </p>
+        <pre id="geoOutput"></pre>
+    </div>
+    
+    <div class="test">
+        <h2>Valhalla Route Test</h2>
+        <p>
+            <input type="number" id="lat1" placeholder="Start Lat" value="28.408">
+            <input type="number" id="lng1" placeholder="Start Lng" value="77.550">
+            <input type="number" id="lat2" placeholder="End Lat" value="28.5244">
+            <input type="number" id="lng2" placeholder="End Lng" value="77.2065">
+            <button onclick="testValhallaDirectly()">Test Valhalla API</button>
+            <button onclick="testGraphHopper()">Test GraphHopper (NEW)</button>
+        </p>
+        <pre id="routeOutput"></pre>
+    </div>
+    
+    <div class="test">
+        <h2>Known Working Locations</h2>
+        <p>Try these coordinates (verified to work):</p>
+        <ul>
+            <li>Delhi Sector 5 Start: <strong>28.5273, 77.2197</strong></li>
+            <li>Delhi Sector 10 End: <strong>28.5421, 77.1846</strong></li>
+            <button onclick="testKnownRoute()">Test Known Locations</button>
+        </ul>
+        <pre id="knownOutput"></pre>
+    </div>
+
+    <script>
+        const OPENCAGE_API_KEY = 'f70c1042f67043818d42e63b5d4a4e9d';
+        const GRAPHHOPPER_URL = 'https://graphhopper.com/api/1/route';
+        
+        
+        async function testGeocoding() {
+            const address = document.getElementById('geoInput').value;
+            const output = document.getElementById('geoOutput');
+            output.innerText = `Testing: ${address}\n\nLoading...`;
+            
+            try {
+                const params = new URLSearchParams({
+                    q: address,
+                    key: OPENCAGE_API_KEY,
+                    countrycode: 'in',
+                    limit: 5
+                });
+                
+                const response = await fetch(`https://api.opencagedata.com/geocode/v1/json?${params.toString()}`);
+                const data = await response.json();
+                
+                output.innerText = `Results for: ${address}\n\n${JSON.stringify(data, null, 2)}`;
+                
+                if (data.results && data.results.length > 0) {
+                    const r = data.results[0];
+                    console.log(`First result: ${r.geometry.lat}, ${r.geometry.lng}`);
+                    document.getElementById('lat1').value = r.geometry.lat;
+                    document.getElementById('lng1').value = r.geometry.lng;
+                }
+            } catch (err) {
+                output.innerText = `Error: ${err.message}`;
+            }
+        }
+        
+        async function testValhallaDirectly() {
+            const lat1 = parseFloat(document.getElementById('lat1').value);
+            const lng1 = parseFloat(document.getElementById('lng1').value);
+            const lat2 = parseFloat(document.getElementById('lat2').value);
+            const lng2 = parseFloat(document.getElementById('lng2').value);
+            const output = document.getElementById('routeOutput');
+            
+            output.innerText = `Testing Valhalla API\nFrom [${lat1}, ${lng1}] to [${lat2}, ${lng2}]\n\nLoading...`;
+            
+            try {
+                const body = {
+                    locations: [
+                        { lat: lat1, lon: lng1 },
+                        { lat: lat2, lon: lng2 }
+                    ],
+                    costing: 'auto',
+                    directions_options: { units: 'kilometers' },
+                    shape_match: 'map_snap'
+                };
+                
+                const response = await fetch('https://valhalla1.openstreetmap.de/route', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    output.innerText = `SUCCESS! Route found.\n\nDistance: ${(data.trip.summary.length / 1000).toFixed(2)} km\n\n${JSON.stringify(data, null, 2)}`;
+                } else {
+                    output.innerText = `FAILED\nStatus: ${response.status}\n\n${JSON.stringify(data, null, 2)}`;
+                }
+            } catch (err) {
+                output.innerText = `Error: ${err.message}`;
+            }
+        }
+        
+        async function testRoute() {
+            const start = document.getElementById('startInput').value;
+            const end = document.getElementById('endInput').value;
+            const output = document.getElementById('routeOutput');
+            
+            output.innerText = `Testing route from "${start}" to "${end}"\n\nGeocoding start...`;
+            
+            try {
+                // Geocode start
+                const params1 = new URLSearchParams({
+                    q: start,
+                    key: OPENCAGE_API_KEY,
+                    countrycode: 'in'
+                });
+                const resp1 = await fetch(`https://api.opencagedata.com/geocode/v1/json?${params1.toString()}`);
+                const data1 = await resp1.json();
+                
+                if (!data1.results || data1.results.length === 0) {
+                    throw new Error(`Could not geocode start: ${start}`);
+                }
+                
+                const [lat1, lng1] = [data1.results[0].geometry.lat, data1.results[0].geometry.lng];
+                output.innerText += `\nStart: [${lat1.toFixed(4)}, ${lng1.toFixed(4)}]`;
+                
+                // Geocode end
+                output.innerText += `\nGeocoding end...`;
+                const params2 = new URLSearchParams({
+                    q: end,
+                    key: OPENCAGE_API_KEY,
+                    countrycode: 'in'
+                });
+                const resp2 = await fetch(`https://api.opencagedata.com/geocode/v1/json?${params2.toString()}`);
+                const data2 = await resp2.json();
+                
+                if (!data2.results || data2.results.length === 0) {
+                    throw new Error(`Could not geocode end: ${end}`);
+                }
+                
+                const [lat2, lng2] = [data2.results[0].geometry.lat, data2.results[0].geometry.lng];
+                output.innerText += `\nEnd: [${lat2.toFixed(4)}, ${lng2.toFixed(4)}]`;
+                
+                // Request route from OSRM (free routing)
+                output.innerText += `\nRequesting route from OSRM...`;
+                const osrmUrl = `https://router.project-osrm.org/route/v1/driving/${lng1},${lat1};${lng2},${lat2}?geometries=geojson&overview=full`;
+                
+                const routeResp = await fetch(osrmUrl, {
+                    method: 'GET',
+                    headers: { 'Accept': 'application/json' }
+                });
+                
+                const routeData = await routeResp.json();
+                
+                if (routeResp.ok && routeData.code === 'Ok' && routeData.routes && routeData.routes.length > 0) {
+                    const route = routeData.routes[0];
+                    output.innerText += `\n\nSUCCESS!\nDistance: ${(route.distance / 1000).toFixed(2)} km\nDuration: ${Math.round(route.duration / 60)} minutes`;
+                } else {
+                    output.innerText += `\n\nFAILED\nStatus: ${routeResp.status}\nMessage: ${routeData.message}\n\nFull response:\n${JSON.stringify(routeData, null, 2)}`;
+                }
+            } catch (err) {
+                output.innerText += `\n\nError: ${err.message}`;
+            }
+        }
+        
+        async function testKnownRoute() {
+            const output = document.getElementById('knownOutput');
+            output.innerText = 'Testing known working locations...\n';
+            
+            const testCases = [
+                { name: 'Delhi Sector 5 to 10', lat1: 28.5273, lng1: 77.2197, lat2: 28.5421, lng2: 77.1846 },
+                { name: 'Delhi Center to Sector 5', lat1: 28.7041, lng1: 77.1025, lat2: 28.5273, lng2: 77.2197 }
+            ];
+            
+            for (const test of testCases) {
+                try {
+                    const response = await fetch('https://valhalla1.openstreetmap.de/route', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            locations: [
+                                { lat: test.lat1, lon: test.lng1 },
+                                { lat: test.lat2, lon: test.lng2 }
+                            ],
+                            costing: 'auto',
+                            shape_match: 'map_snap'
+                        })
+                    });
+                    
+                    const data = await response.json();
+                    if (response.ok) {
+                        output.innerText += `✓ ${test.name}: SUCCESS - ${(data.trip.summary.length / 1000).toFixed(2)} km\n`;
+                    } else {
+                        output.innerText += `✗ ${test.name}: FAILED - Error ${data.error_code}: ${data.error}\n`;
+                    }
+                } catch (err) {
+                    output.innerText += `✗ ${test.name}: Error - ${err.message}\n`;
+                }
+            }
+        }
+        
+        async function testGraphHopper() {
+            const lat1 = parseFloat(document.getElementById('lat1').value);
+            const lng1 = parseFloat(document.getElementById('lng1').value);
+            const lat2 = parseFloat(document.getElementById('lat2').value);
+            const lng2 = parseFloat(document.getElementById('lng2').value);
+            const output = document.getElementById('routeOutput');
+            
+            output.innerText = `Testing GraphHopper API\nFrom [${lat1}, ${lng1}] to [${lat2}, ${lng2}]\n\nLoading...`;
+            
+            try {
+                const ghUrl = new URL(GRAPHHOPPER_URL);
+                ghUrl.searchParams.append('point', `${lat1},${lng1}`);
+                ghUrl.searchParams.append('point', `${lat2},${lng2}`);
+                ghUrl.searchParams.append('vehicle', 'car');
+                ghUrl.searchParams.append('locale', 'en');
+                ghUrl.searchParams.append('points_encoded', 'false');
+                ghUrl.searchParams.append('instructions', 'true');
+                ghUrl.searchParams.append('key', 'a7de617b-e9a6-4c0f-a8fd-1d34e7b6d83f');
+                
+                console.log('GraphHopper URL:', ghUrl.toString());
+                
+                const response = await fetch(ghUrl.toString(), {
+                    method: 'GET',
+                    headers: {
+                        'Accept': 'application/json'
+                    }
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok && data.paths && data.paths.length > 0) {
+                    const path = data.paths[0];
+                    const distKm = (path.distance / 1000).toFixed(2);
+                    const minTime = (path.time / 60000).toFixed(0);
+                    output.innerText = `SUCCESS! Route found.\n\nDistance: ${distKm} km\nDuration: ${minTime} minutes\n\n${JSON.stringify(data, null, 2)}`;
+                } else {
+                    output.innerText = `FAILED\nStatus: ${response.status}\n\n${JSON.stringify(data, null, 2)}`;
+                }
+            } catch (err) {
+                output.innerText = `Error: ${err.message}`;
+            }
+        }
+    </script>
+</body>
+</html>

@@ -1,4 +1,6 @@
 const OPENCAGE_API_KEY = 'f70c1042f67043818d42e63b5d4a4e9d';
+// OSRM API - completely free, no API key required
+const OSRM_URL = 'https://router.project-osrm.org/route/v1/driving';
 
 let map;
 let routingControl;
@@ -7,11 +9,15 @@ let routeActive = false;
 let locationLoadedOnce = false;
 let startRouteMarker = null;
 let endRouteMarker = null;
+let districtData = []; // Store all district data from CSV
 let safetyData = [];
 let allFetchedReports = [];
 let renderedReportCount = 0;
 const REPORT_BATCH_SIZE = 5;
 const REPORT_FETCH_LIMIT = 50;
+const ROUTE_PERSIST_MS = 10 * 60 * 1000;
+let routeLayerGroup;
+let routeClearTimeout = null;
 
 // Use absolute URL whenever the page is NOT served by our own port-3000 server
 const DEFAULT_API_BASE = (
@@ -26,6 +32,207 @@ function apiUrl(path) {
 
 function getAuthToken() {
   return localStorage.getItem('firebaseIdToken');
+}
+
+function formatDuration(seconds) {
+  const totalMinutes = Math.round(seconds / 60);
+  if (totalMinutes < 60) {
+    return `${totalMinutes} min`;
+  }
+
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return minutes ? `${hours} hr ${minutes} min` : `${hours} hr`;
+}
+
+function formatDistance(meters) {
+  if (meters < 1000) {
+    return `${Math.round(meters)} m`;
+  }
+
+  return `${(meters / 1000).toFixed(1)} km`;
+}
+
+function resetRouteExpiry() {
+  if (routeClearTimeout) {
+    clearTimeout(routeClearTimeout);
+  }
+
+  routeClearTimeout = setTimeout(() => {
+    clearPersistedRoute();
+  }, ROUTE_PERSIST_MS);
+}
+
+function clearPersistedRoute() {
+  routeActive = false;
+
+  if (routeClearTimeout) {
+    clearTimeout(routeClearTimeout);
+    routeClearTimeout = null;
+  }
+
+  if (routeLayerGroup) {
+    routeLayerGroup.clearLayers();
+  }
+
+  if (routingControl) {
+    routingControl.setWaypoints([]);
+  }
+
+  if (startRouteMarker && map) {
+    map.removeLayer(startRouteMarker);
+    startRouteMarker = null;
+  }
+
+  if (endRouteMarker && map) {
+    map.removeLayer(endRouteMarker);
+    endRouteMarker = null;
+  }
+
+  const safetyScoresElement = document.getElementById('safety-scores');
+  if (safetyScoresElement) {
+    safetyScoresElement.innerHTML = '';
+  }
+
+  const directionsEl = document.getElementById('route-directions');
+  if (directionsEl) {
+    directionsEl.innerHTML = '<p>Enter a start and destination above to see directions.</p>';
+  }
+}
+
+function renderRouteDirections(route) {
+  const el = document.getElementById('route-directions');
+  if (!el) {
+    return;
+  }
+
+  const steps = Array.isArray(route.instructions) ? route.instructions : [];
+  const summary = route.summary || {};
+
+  // Build detailed step list with distance for each step
+  const stepsHtml = steps.length
+    ? `<ol class="route-steps">${steps.map((s, idx) => {
+        const stepDistance = formatDistance(s.distance || 0);
+        const stepDuration = s.duration ? formatDuration(s.duration) : '';
+        const durationText = stepDuration ? ` (${stepDuration})` : '';
+        return `<li class="route-step">
+          <span class="step-text">${s.text}</span>
+          <span class="step-dist">${stepDistance}${durationText}</span>
+        </li>`;
+      }).join('')}</ol>`
+    : '<p>Route found — no turn-by-turn steps available.</p>';
+
+  el.innerHTML = `
+    <h3>Directions</h3>
+    <div class="route-summary">
+      <div class="summary-item">
+        <strong>📍 Distance:</strong> ${formatDistance(summary.totalDistance || 0)}
+      </div>
+      <div class="summary-item">
+        <strong>⏱ Duration:</strong> ${formatDuration(summary.totalTime || 0)}
+      </div>
+    </div>
+    <h4>Turn-by-Turn Instructions:</h4>
+    ${stepsHtml}
+  `;
+  
+  // Add CSS for better styling
+  if (!document.getElementById('route-directions-css')) {
+    const style = document.createElement('style');
+    style.id = 'route-directions-css';
+    style.textContent = `
+      #route-directions {
+        max-height: 600px;
+        overflow-y: auto;
+        padding: 15px;
+        background: white;
+        border-radius: 8px;
+      }
+      .route-summary {
+        background: #f0f7ff;
+        padding: 12px;
+        border-radius: 4px;
+        margin: 10px 0;
+        border-left: 4px solid #4CAF50;
+      }
+      .summary-item {
+        padding: 5px 0;
+        font-size: 14px;
+      }
+      .route-steps {
+        padding-left: 20px;
+        margin: 15px 0;
+      }
+      .route-step {
+        padding: 8px;
+        margin: 5px 0;
+        background: #f9f9f9;
+        border-radius: 4px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        border-left: 3px solid #4CAF50;
+      }
+      .step-text {
+        flex: 1;
+        font-size: 13px;
+        color: #333;
+      }
+      .step-dist {
+        background: #4CAF50;
+        color: white;
+        padding: 4px 8px;
+        border-radius: 3px;
+        font-size: 12px;
+        font-weight: bold;
+        margin-left: 10px;
+        white-space: nowrap;
+      }
+    `;
+    document.head.appendChild(style);
+  }
+}
+
+function drawPersistentRoute(route) {
+  if (!map || !routeLayerGroup) {
+    return;
+  }
+
+  routeLayerGroup.clearLayers();
+
+  const latLngs = (route.coordinates || []).map((point) => [point.lat, point.lng]);
+  if (!latLngs.length) {
+    return;
+  }
+
+  // Draw outer glow effect
+  L.polyline(latLngs, {
+    color: '#ff9f43',
+    weight: 20,
+    opacity: 0.3,
+    lineJoin: 'round',
+    lineCap: 'round'
+  }).addTo(routeLayerGroup);
+
+  // Draw main route line (prominent blue)
+  L.polyline(latLngs, {
+    color: '#2980b9',
+    weight: 8,
+    opacity: 1,
+    lineJoin: 'round',
+    lineCap: 'round'
+  }).addTo(routeLayerGroup);
+
+  // Draw highlight line
+  L.polyline(latLngs, {
+    color: '#3498db',
+    weight: 4,
+    opacity: 0.7,
+    lineJoin: 'round',
+    lineCap: 'round'
+  }).addTo(routeLayerGroup);
+
+  resetRouteExpiry();
 }
 
 function isVerifiedUserLoggedIn() {
@@ -122,52 +329,273 @@ async function loadRecentReports() {
   }
 }
 
+function decodePolyline(str, precision) {
+  const factor = Math.pow(10, precision || 6);
+  const len = str.length;
+  const result = [];
+  let index = 0, lat = 0, lng = 0;
+  while (index < len) {
+    let b, shift = 0, res = 0;
+    do { b = str.charCodeAt(index++) - 63; res |= (b & 0x1f) << shift; shift += 5; } while (b >= 0x20);
+    lat += (res & 1) ? ~(res >> 1) : (res >> 1);
+    shift = 0; res = 0;
+    do { b = str.charCodeAt(index++) - 63; res |= (b & 0x1f) << shift; shift += 5; } while (b >= 0x20);
+    lng += (res & 1) ? ~(res >> 1) : (res >> 1);
+    result.push(L.latLng(lat / factor, lng / factor));
+  }
+  return result;
+}
+
+async function fetchOSRMRoute(startLatLng, endLatLng, retryCount = 0) {
+  // Validate coordinates
+  if (!startLatLng || !endLatLng) {
+    throw new Error('Invalid start or end location');
+  }
+  
+  let startLat = startLatLng.lat;
+  let startLng = startLatLng.lng;
+  let endLat = endLatLng.lat;
+  let endLng = endLatLng.lng;
+  
+  // Check if coordinates are numbers
+  if (typeof startLat !== 'number' || typeof startLng !== 'number' || 
+      typeof endLat !== 'number' || typeof endLng !== 'number') {
+    throw new Error('Start or destination coordinates are invalid (not numbers)');
+  }
+  
+  // Check for NaN
+  if (isNaN(startLat) || isNaN(startLng) || isNaN(endLat) || isNaN(endLng)) {
+    throw new Error('Start or destination coordinates contain NaN values');
+  }
+  
+  // Check geographic bounds
+  if (startLat < -90 || startLat > 90 || startLng < -180 || startLng > 180 ||
+      endLat < -90 || endLat > 90 || endLng < -180 || endLng > 180) {
+    throw new Error('Start or destination coordinates are outside valid geographic bounds');
+  }
+  
+  // Check if start and end are too close
+  const distance = Math.sqrt(Math.pow(endLat - startLat, 2) + Math.pow(endLng - startLng, 2));
+  if (distance < 0.0001) {
+    throw new Error('Start and destination are too close to each other');
+  }
+  
+  console.log(`Requesting route (attempt ${retryCount + 1}) from [${startLat.toFixed(4)}, ${startLng.toFixed(4)}] to [${endLat.toFixed(4)}, ${endLng.toFixed(4)}]`);
+  
+  try {
+    // Use OSRM API - completely free, no API key required
+    // Format: /route/v1/driving/lng1,lat1;lng2,lat2
+    const osrmUrl = `${OSRM_URL}/${startLng},${startLat};${endLng},${endLat}?steps=true&geometries=geojson&overview=full&annotations=distance,duration`;
+    
+    console.log('Requesting route from OSRM...');
+    
+    const resp = await fetch(osrmUrl, {
+      method: 'GET',
+      headers: {
+        'Accept': 'application/json'
+      }
+    });
+    
+    if (!resp.ok) {
+      const errorData = await resp.text();
+      console.error('OSRM Router error response:', errorData);
+      throw new Error(`Routing service error ${resp.status}`);
+    }
+    
+    const data = await resp.json();
+    
+    if (data.code !== 'Ok' || !data.routes || data.routes.length === 0) {
+      if (retryCount < 2) {
+        console.log(`No route found (attempt ${retryCount + 1}/3). Trying again...`);
+        return fetchOSRMRoute(startLatLng, endLatLng, retryCount + 1);
+      }
+      throw new Error(data.message || 'No route found between these locations. Try different addresses.');
+    }
+    
+    const route = data.routes[0];
+    
+    // OSRM returns coordinates as [lng, lat] in geometry.coordinates
+    // Convert to [lat, lng] for our map
+    const coordinates = route.geometry.coordinates.map((coord) => [coord[1], coord[0]]);
+    
+    // Extract detailed turn-by-turn instructions from OSRM steps
+    const allSteps = [];
+    (route.legs || []).forEach((leg, legIdx) => {
+      if (leg.steps && Array.isArray(leg.steps)) {
+        leg.steps.forEach((step, stepIdx) => {
+          let instruction = 'Continue';
+          const roadName = step.name || '';
+          
+          // Skip trivial steps (< 500m "Continue" with no road name)
+          if (!step.maneuver && step.distance < 500 && !roadName) {
+            return;
+          }
+          
+          // Build instruction from maneuver information
+          if (step.maneuver) {
+            const { type, modifier } = step.maneuver;
+            
+            switch (type) {
+              case 'turn':
+                if (modifier === 'left') instruction = 'Turn left';
+                else if (modifier === 'right') instruction = 'Turn right';
+                else if (modifier === 'sharp left') instruction = 'Sharp left turn';
+                else if (modifier === 'sharp right') instruction = 'Sharp right turn';
+                else if (modifier === 'slight left') instruction = 'Bear left';
+                else if (modifier === 'slight right') instruction = 'Bear right';
+                else instruction = 'Turn';
+                break;
+              case 'arrive':
+                instruction = 'Destination reached';
+                break;
+              case 'roundabout':
+              case 'rotary':
+                instruction = 'Enter roundabout';
+                break;
+              case 'exit_rotary':
+              case 'exit_roundabout':
+                instruction = 'Exit roundabout';
+                break;
+              case 'end_of_road':
+                instruction = 'Road ends';
+                break;
+              case 'merge':
+                instruction = 'Merge';
+                break;
+              case 'fork':
+                instruction = 'Fork';
+                break;
+              case 'notification':
+              case 'waypoint':
+                if (roadName) instruction = `Proceed to ${roadName}`;
+                else return; // Skip empty notifications
+                break;
+              case 'continue':
+              default:
+                instruction = roadName ? `Continue on ${roadName}` : 'Continue';
+            }
+            
+            // Add road name for non-continue instructions
+            if (roadName && !instruction.includes(' on ') && instruction !== 'Destination reached') {
+              instruction += ` on ${roadName}`;
+            }
+          } else if (roadName) {
+            // No maneuver info but has road name
+            instruction = `Continue on ${roadName}`;
+          }
+          
+          // Skip empty instructions
+          if (!instruction || instruction === 'Continue') {
+            return;
+          }
+          
+          allSteps.push({
+            text: instruction,
+            distance: step.distance || 0,
+            duration: step.duration || 0,
+            name: roadName
+          });
+        });
+      }
+    });
+
+    const trip = {
+      legs: [{
+        shape: coordinates, // Array of [lat, lng] coordinates
+        steps: allSteps
+      }],
+      summary: {
+        length: route.distance || 0,
+        time: route.duration || 0,
+        totalDistance: route.distance || 0,
+        totalTime: route.duration || 0
+      },
+      instructions: allSteps // All detailed steps
+    };
+    
+    console.log('Route found successfully!', { 
+      distance: (route.distance / 1000).toFixed(2) + ' km', 
+      duration: (route.duration / 60).toFixed(0) + ' min' 
+    });
+    return trip;
+    
+  } catch (err) {
+    if (err instanceof TypeError && err.message.includes('fetch')) {
+      throw new Error('Network error: Cannot reach routing service. Check your internet connection.');
+    }
+    throw err;
+  }
+}
+
+function applyOSRMRoute(trip, startLatLng, endLatLng) {
+  // Handle both encoded polyline and direct coordinates
+  let coords = [];
+  
+  if (typeof trip.legs[0].shape === 'string') {
+    // Encoded polyline (from old Valhalla format)
+    coords = decodePolyline(trip.legs[0].shape);
+  } else if (Array.isArray(trip.legs[0].shape)) {
+    // Direct array of coordinates from OSRM
+    // Format: [[lat, lng], [lat, lng], ...]
+    coords = trip.legs[0].shape.map(coord => {
+      if (Array.isArray(coord)) {
+        return L.latLng(coord[0], coord[1]);
+      }
+      return coord;
+    });
+  }
+  
+  // Draw the route polyline on map
+  drawPersistentRoute({ coordinates: coords });
+  
+  // Fit map to show entire route
+  if (coords.length > 1) {
+    map.fitBounds(L.latLngBounds(coords), { padding: [30, 30] });
+  }
+  
+  // Show all safety heatmaps
+  addHotspots();
+  
+  // Extract turn-by-turn instructions (OSRM returns full steps)
+  let instructions = [];
+  
+  if (trip.instructions && Array.isArray(trip.instructions)) {
+    // Use the detailed steps extracted from OSRM
+    instructions = trip.instructions.map(inst => ({
+      text: inst.text || inst.name || 'Continue',
+      distance: inst.distance || 0,
+      duration: inst.duration || 0
+    }));
+  }
+  
+  // Render directions
+  renderRouteDirections({
+    summary: {
+      totalDistance: trip.summary.totalDistance || trip.summary.length || 0,
+      totalTime: trip.summary.totalTime || trip.summary.time || 0
+    },
+    instructions: instructions,
+    routeCoords: coords
+  });
+}
+
 function initMap() {
   if (!document.getElementById('map')) {
     return;
   }
 
   map = L.map('map').setView([28.6139, 77.209], 13);
+  routeLayerGroup = L.layerGroup().addTo(map);
 
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     attribution: '&copy; OpenStreetMap contributors'
   }).addTo(map);
 
-  routingControl = L.Routing.control({
-    waypoints: [],
-    routeWhileDragging: true
-  }).addTo(map);
-
-  routingControl.on('routesfound', (event) => {
-    if (!event.routes || !event.routes.length) {
-      return;
-    }
-
-    routeActive = true;
-
-    const coordinates = event.routes[0].coordinates || [];
-    if (coordinates.length > 1) {
-      const bounds = L.latLngBounds(coordinates);
-      map.fitBounds(bounds, { padding: [30, 30] });
-    }
-  });
-
-  addPanControls();
-}
-
-function addPanControls() {
-  const panControls = document.createElement('div');
-  panControls.innerHTML = `
-    <div id="pan-controls" style="position: fixed; bottom: 30px; left: 30px; z-index: 1000; display: flex; flex-direction: column; align-items: center;">
-      <button onclick="panMap(0, -0.05)" style="margin-bottom: 5px;">⬅️</button>
-      <div style="display: flex;">
-        <button onclick="panMap(-0.05, 0)" style="margin-right: 5px;">⬇️</button>
-        <button onclick="panMap(0.05, 0)">⬆️</button>
-      </div>
-      <button onclick="panMap(0, 0.05)" style="margin-top: 5px;">➡️</button>
-    </div>
-  `;
-  document.body.appendChild(panControls);
+  // routingControl is kept only so existing code that calls setWaypoints/clearWaypoints still works
+  routingControl = {
+    setWaypoints: () => {},
+    getPlan: () => ({ setWaypoints: () => {} })
+  };
 }
 
 function setupFamilyContactModal() {
@@ -344,19 +772,56 @@ function panMap(latOffset, lngOffset) {
 }
 
 function geocodeAddress(address, callback) {
-  fetch(`https://api.opencagedata.com/geocode/v1/json?q=${encodeURIComponent(address)}&key=${OPENCAGE_API_KEY}`)
-    .then((response) => response.json())
+  // Use bounds centered on India (Delhi region) to help geocoding
+  const indiaLat = 28.7; // Delhi latitude
+  const indiaLng = 77.1; // Delhi longitude
+  const boundingBox = `${indiaLat - 2},${indiaLng - 2},${indiaLat + 2},${indiaLng + 2}`;
+  
+  const params = new URLSearchParams({
+    q: address,
+    key: OPENCAGE_API_KEY,
+    bounds: boundingBox,
+    countrycode: 'in',
+    limit: 5
+  });
+  
+  fetch(`https://api.opencagedata.com/geocode/v1/json?${params.toString()}`)
+    .then((response) => {
+      if (!response.ok) {
+        throw new Error(`Geocoding API returned ${response.status}`);
+      }
+      return response.json();
+    })
     .then((data) => {
-      if (data.results.length > 0) {
-        const { lat, lng } = data.results[0].geometry;
-        callback([lat, lng]);
+      if (data.results && data.results.length > 0) {
+        // Try to use the result - validate it
+        let validResult = null;
+        for (let i = 0; i < Math.min(data.results.length, 3); i++) {
+          const result = data.results[i];
+          const { lat, lng } = result.geometry;
+          
+          if (typeof lat === 'number' && typeof lng === 'number' && !isNaN(lat) && !isNaN(lng)) {
+            if (lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180) {
+              validResult = { lat, lng, result };
+              break;
+            }
+          }
+        }
+        
+        if (validResult) {
+          console.log(`Geocoded "${address}" to [${validResult.lat}, ${validResult.lng}]`);
+          console.log('Result details:', validResult.result);
+          callback([validResult.lat, validResult.lng]);
+        } else {
+          throw new Error('All geocoding results had invalid coordinates');
+        }
       } else {
-        alert('Address not found.');
+        alert(`Address "${address}" not found in India. Please try a different address.`);
       }
     })
     .catch((error) => {
       console.error('Error geocoding address:', error);
-      alert('Error geocoding address.');
+      alert(`Geocoding error: ${error.message}. For best results, try a full address with city.`);
     });
 }
 
@@ -372,35 +837,149 @@ function loadSafetyData() {
     });
 }
 
+function loadDistrictData() {
+  // Use PapaParse library (already included in index.html) to properly parse CSV
+  fetch('safety%20scores.csv')
+    .then((response) => response.text())
+    .then((csvText) => {
+      // Parse CSV with PapaParse
+      Papa.parse(csvText, {
+        header: true,
+        dynamicTyping: true,
+        skipEmptyLines: true,
+        complete: function(results) {
+          console.log('CSV Parsing complete. Rows:', results.data.length);
+          
+          const districts = [];
+          
+          results.data.forEach((row, idx) => {
+            // Check if row has required fields
+            if (row.district && row.Latitude && row.Longitude && row.safety_score !== undefined) {
+              // Handle both "Latitude"/"Longitude" and "latitude"/"longitude" keys
+              const lat = row.Latitude || row.latitude;
+              const lng = row.Longitude || row.longitude;
+              const score = row.safety_score;
+              
+              const lat_num = parseFloat(lat);
+              const lng_num = parseFloat(lng);
+              const score_num = parseFloat(score);
+              
+              if (!isNaN(lat_num) && !isNaN(lng_num) && !isNaN(score_num)) {
+                const district = {
+                  state: row.state || '',
+                  name: row.district.trim(),
+                  lat: lat_num,
+                  lng: lng_num,
+                  safety_score: score_num
+                };
+                
+                districts.push(district);
+              }
+            }
+          });
+          
+          districtData = districts;
+          console.log('Successfully loaded ' + districts.length + ' districts');
+          if (districts.length > 0) {
+            console.log('Sample district:', districts[0]);
+          }
+        },
+        error: function(error) {
+          console.error('CSV parsing error:', error);
+        }
+      });
+    })
+    .catch((error) => {
+      console.error('Error loading district data:', error);
+    });
+}
+
+function getDistrictSuggestions(input) {
+  if (!input || input.length < 1) return [];
+  
+  return districtData
+    .filter(d => d.name.toLowerCase().includes(input.toLowerCase()))
+    .slice(0, 10)
+    .map(d => d.name);
+}
+
 function addHotspots() {
-  if (!map || !Array.isArray(safetyData)) {
+  if (!map) {
     return;
   }
 
-  safetyData.forEach((entry) => {
-    const { Latitude, Longitude, safety_score: safetyScore } = entry;
+  // Clear existing heatmap layers
+  if (window.heatmapLayer) {
+    map.removeLayer(window.heatmapLayer);
+  }
 
-    let color;
-    if (safetyScore > 90) {
-      color = '#77DD77';
-    } else if (safetyScore > 80) {
-      color = '#B2B27F';
-    } else if (safetyScore > 70) {
-      color = '#FDFD96';
-    } else if (safetyScore > 60) {
-      color = '#F6C4C4';
-    } else {
-      color = '#FFB3B3';
-    }
+  // Create layer group for heatmap
+  const heatmapGroup = L.layerGroup();
 
-    L.circle([Latitude, Longitude], {
-      color,
-      fillColor: color,
-      fillOpacity: 0.2,
-      radius: 5000
-    }).addTo(map)
-      .bindPopup(`<b>Safety Score: ${Number(safetyScore).toFixed(2)}</b>`);
-  });
+  // Add district circles with safety score colors
+  if (Array.isArray(districtData) && districtData.length > 0) {
+    districtData.forEach((district) => {
+      let color;
+      const score = district.safety_score;
+      
+      if (score > 90) {
+        color = '#77DD77'; // Green - Very Safe
+      } else if (score > 80) {
+        color = '#B2B27F'; // Yellow-Green - Safe
+      } else if (score > 70) {
+        color = '#FDFD96'; // Yellow - Moderate
+      } else if (score > 60) {
+        color = '#F6C4C4'; // Light Red - Unsafe
+      } else {
+        color = '#FFB3B3'; // Red - Very Unsafe
+      }
+
+      L.circle([district.lat, district.lng], {
+        color: color,
+        fillColor: color,
+        fillOpacity: 0.35,
+        radius: 8000, // Larger radius for better visibility
+        weight: 2
+      }).addTo(heatmapGroup)
+        .bindPopup(`
+          <b>${district.name}</b><br>
+          State: ${district.state}<br>
+          Safety Score: <strong style="color: ${color}; font-size: 16px;">${Number(district.safety_score).toFixed(2)}</strong>
+        `, { minWidth: 200 });
+    });
+  }
+
+  // Add individual point data as smaller circles (if available)
+  if (Array.isArray(safetyData) && safetyData.length > 0) {
+    safetyData.forEach((entry) => {
+      const { Latitude, Longitude, safety_score: safetyScore } = entry;
+
+      let color;
+      if (safetyScore > 90) {
+        color = '#77DD77';
+      } else if (safetyScore > 80) {
+        color = '#B2B27F';
+      } else if (safetyScore > 70) {
+        color = '#FDFD96';
+      } else if (safetyScore > 60) {
+        color = '#F6C4C4';
+      } else {
+        color = '#FFB3B3';
+      }
+
+      L.circle([Latitude, Longitude], {
+        color: color,
+        fillColor: color,
+        fillOpacity: 0.15,
+        radius: 3000,
+        weight: 1
+      }).addTo(heatmapGroup)
+        .bindPopup(`Safety Score: ${Number(safetyScore).toFixed(2)}`);
+    });
+  }
+
+  heatmapGroup.addTo(map);
+  window.heatmapLayer = heatmapGroup;
 }
 
 function getSafetyScore(lat, lng, callback) {
@@ -422,72 +1001,104 @@ function getSafetyScore(lat, lng, callback) {
 }
 
 function findRoute() {
-  const startInputElement = document.getElementById('start');
-  const destinationElement = document.getElementById('destination');
+  const startInput = document.getElementById('start');
+  const destInput = document.getElementById('destination');
   const safetyScoresElement = document.getElementById('safety-scores');
 
-  if (!destinationElement || !startInputElement || !routingControl) {
+  if (!startInput || !destInput || !routingControl) {
+    alert('Please wait for app to load...');
     return;
   }
 
-  const startInput = startInputElement.value;
-  const destination = destinationElement.value;
+  const startDistrictName = startInput.value.trim();
+  const destDistrictName = destInput.value.trim();
 
-  if (!destination) {
-    alert('Please enter a destination.');
+  if (!startDistrictName || !destDistrictName) {
+    alert('Please enter both start and destination districts.');
     return;
   }
 
-  const processRoute = (startCoords, endCoords) => {
-    routeActive = true;
+  if (startDistrictName.toLowerCase() === destDistrictName.toLowerCase()) {
+    alert('Please select different start and destination districts.');
+    return;
+  }
 
-    routingControl.setWaypoints([
-      L.latLng(startCoords[0], startCoords[1]),
-      L.latLng(endCoords[0], endCoords[1])
-    ]);
+  const directionsEl = document.getElementById('route-directions');
+  if (directionsEl) {
+    directionsEl.innerHTML = '<p>Searching for districts…</p>';
+  }
 
-    const routeBounds = L.latLngBounds([
-      L.latLng(startCoords[0], startCoords[1]),
-      L.latLng(endCoords[0], endCoords[1])
-    ]);
-    map.fitBounds(routeBounds.pad(0.3));
+  // Find matching districts (case-insensitive)
+  const startDistrict = districtData.find(d => d.name.toLowerCase() === startDistrictName.toLowerCase());
+  const endDistrict = districtData.find(d => d.name.toLowerCase() === destDistrictName.toLowerCase());
 
-    // Make route changes obvious by marking current start and destination.
-    if (startRouteMarker) {
-      map.removeLayer(startRouteMarker);
-    }
-    if (endRouteMarker) {
-      map.removeLayer(endRouteMarker);
-    }
-    startRouteMarker = L.marker([startCoords[0], startCoords[1]]).addTo(map)
-      .bindPopup('Start point');
-    endRouteMarker = L.marker([endCoords[0], endCoords[1]]).addTo(map)
-      .bindPopup('Destination');
-
-    addHotspots();
-
-    if (safetyScoresElement) {
-      getSafetyScore(startCoords[0], startCoords[1], (startSafetyScore) => {
-        getSafetyScore(endCoords[0], endCoords[1], (endSafetyScore) => {
-          safetyScoresElement.innerHTML = `Safety Score for Start: ${startSafetyScore.toFixed(2)}<br>Safety Score for Destination: ${endSafetyScore.toFixed(2)}`;
-        });
-      });
-    }
-  };
-
-  geocodeAddress(destination, (endCoords) => {
-    if (!startInput || startInput.toLowerCase() === 'my location') {
-      if (currentLiveLocation) {
-        processRoute([currentLiveLocation.lat, currentLiveLocation.lng], endCoords);
-      } else {
-        alert('Live location not available yet. Please wait or enter a start location.');
-      }
+  if (!startDistrict) {
+    const similar = districtData.filter(d => d.name.toLowerCase().includes(startDistrictName.toLowerCase())).slice(0, 5);
+    let message = `District "${startDistrictName}" not found. `;
+    if (similar.length > 0) {
+      message += `Did you mean: ${similar.map(d => d.name).join(', ')}?`;
     } else {
-      geocodeAddress(startInput, (startCoords) => {
-        processRoute(startCoords, endCoords);
-      });
+      message += `Check the spelling. Available districts starting with "${startDistrictName[0]}": ${districtData.filter(d => d.name[0].toLowerCase() === startDistrictName[0].toLowerCase()).slice(0, 5).map(d => d.name).join(', ')}...`;
     }
-  });
+    alert(message);
+    return;
+  }
+
+  if (!endDistrict) {
+    const similar = districtData.filter(d => d.name.toLowerCase().includes(destDistrictName.toLowerCase())).slice(0, 5);
+    let message = `District "${destDistrictName}" not found. `;
+    if (similar.length > 0) {
+      message += `Did you mean: ${similar.map(d => d.name).join(', ')}?`;
+    } else {
+      message += `Check the spelling. Available districts starting with "${destDistrictName[0]}": ${districtData.filter(d => d.name[0].toLowerCase() === destDistrictName[0].toLowerCase()).slice(0, 5).map(d => d.name).join(', ')}...`;
+    }
+    alert(message);
+    return;
+  }
+
+  const startCoords = [startDistrict.lat, startDistrict.lng];
+  const endCoords = [endDistrict.lat, endDistrict.lng];
+
+  routeActive = true;
+  resetRouteExpiry();
+
+  if (startRouteMarker) { map.removeLayer(startRouteMarker); }
+  if (endRouteMarker) { map.removeLayer(endRouteMarker); }
+  
+  startRouteMarker = L.marker(startCoords).addTo(map).bindPopup(`<b>${startDistrict.name}</b><br>Safety: ${startDistrict.safety_score.toFixed(2)}`);
+  endRouteMarker = L.marker(endCoords).addTo(map).bindPopup(`<b>${endDistrict.name}</b><br>Safety: ${endDistrict.safety_score.toFixed(2)}`);
+
+  // Fit map to show both markers
+  map.fitBounds(L.latLngBounds([startCoords, endCoords]).pad(0.3));
+
+  addHotspots();
+
+  // Show district safety scores
+  if (safetyScoresElement) {
+    safetyScoresElement.innerHTML =
+      `<strong>Safety Scores:</strong><br>${startDistrict.name}: ${startDistrict.safety_score.toFixed(2)}<br>${endDistrict.name}: ${endDistrict.safety_score.toFixed(2)}`;
+  }
+
+  // Calculate route
+  (async () => {
+    try {
+      const osrmRoute = await fetchOSRMRoute(
+        L.latLng(startCoords[0], startCoords[1]),
+        L.latLng(endCoords[0], endCoords[1])
+      );
+      applyOSRMRoute(
+        osrmRoute,
+        L.latLng(startCoords[0], startCoords[1]),
+        L.latLng(endCoords[0], endCoords[1])
+      );
+    } catch (err) {
+      console.error('Routing failed:', err);
+      const el = document.getElementById('route-directions');
+      if (el) {
+        el.innerHTML = `<p style="color:red;">Could not calculate route: ${err.message}.<br>Check your internet connection and try again.</p>`;
+      }
+    }
+  })();
 }
 
 async function submitReport(event) {
@@ -659,6 +1270,7 @@ function showLiveLocation() {
 document.addEventListener('DOMContentLoaded', () => {
   initMap();
   loadSafetyData();
+  loadDistrictData();
   addSOSButton();
   addEmergencyContacts();
   setupFamilyContactModal();

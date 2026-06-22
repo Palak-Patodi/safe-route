@@ -8,8 +8,8 @@
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
-    <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.css" />
-    <script src="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.css" />
+    <script src="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.js"></script>
     <!-- Add a form submission service for SOS emails -->
     <script src="https://smtpjs.com/v3/smtp.js"></script>
 </head>
@@ -24,6 +24,7 @@
             <li><a href="login.html" id="login-link">Login</a></li>
             <li><button id="logout-btn" style="display: none;">Logout</button></li>
             <li><a href="delhi.html" id="delhi-link">Delhi Safety Planner</a></li>
+            <li><a href="districts-list.html" id="districts-link" style="background: #4CAF50; padding: 8px 15px; border-radius: 4px; color: white;">View All Districts</a></li>
         </ul>
     </nav>
     <div class="moving-tagline">
@@ -37,15 +38,22 @@
         </div>
 
         <div class="search-container">
-            <input type="text" id="start" placeholder="Start Point">
-            <input type="text" id="destination" placeholder="Destination">
+            <input type="text" id="start" placeholder="Start District (type district name)">
+            <input type="text" id="destination" placeholder="Destination District (type district name)">
             <button class="btn" id="find-route-btn">Find Safe Route</button>
         </div>
     </section>
 
     <section class="map-section">
-        <div id="safety-scores"></div>
-        <div id="map"></div>
+        <div class="map-layout">
+            <div id="map"></div>
+            <div class="map-info-panel">
+                <div id="safety-scores"></div>
+                <div id="route-directions">
+                    <p>Enter a start and destination above to see directions.</p>
+                </div>
+            </div>
+        </div>
     </section>
 
     <section class="reports-reviews">

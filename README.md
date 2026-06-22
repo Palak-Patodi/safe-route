@@ -1,34 +1,117 @@
-# Safe Route: Web Application
-![logo] https://github.com/Palak-Patodi/safe-routes/blob/main/logos.jpg
+# Safe Route
 
-## Overview
-Safe Route is a web application designed to enhance  safety by providing real-time, data-driven route suggestions. By calculating safety scores for each district based on crime rates, it helps users select the safest routes and avoid high-risk areas. The app integrates live crime data, empowering people to make informed travel decisions, thereby promoting security in communities.
+Safe Route is a web app that helps users plan safer travel paths, view nearby incident reports, and submit new reports with authenticated accounts.
 
-## Features
-- **Real-time Safety Scores**: Calculates district-wise safety scores based on crime data to suggest the safest routes.
-- **Interactive Maps**: Displays routes with safety ratings on interactive maps.
-- **User Reports**: Allows users to report unsafe areas, helping others avoid potential risks.
-- **Route Planning**: Helps users plan safe paths based on district crime data.
-- **call the police**
-- **sos feature**
-- **emergency contact**
-- 
-## Technology Stack
-- **Frontend**: HTML, CSS, JavaScript – UI design and client-side scripting.
-- **Leaflet.js**: Interactive maps to display routes.
-- **OpenCage API**: Geocoding services to convert location names into geographic coordinates.
-- **Backend**: Python and Flask – HTTP requests, routing, and server-side logic.
-- **Database**: firebase
-- **Data Processing**: Pandas and NumPy – Used to process and analyze crime data to generate safety scores.
-- **Crime Data**: Government Crime Dataset – Used to calculate safety scores for districts.
+## What It Does
 
-## How It Works
-1. **Route Safety Calculation**: The app calculates a safety score for each district based on crime rates from the dataset, guiding users to the safest routes.
-2. **Crime Reporting**: Users can report unsafe areas, contributing to the dataset and helping others avoid those zones.
-3. **Interactive Map**: The user interacts with a map to choose their route, with safety scores visible for each district along the way.
+- Shows route planning on an interactive map.
+- Displays safety scoring from local dataset points.
+- Supports user signup/login with Firebase Authentication.
+- Stores user profiles and incident reports in MongoDB.
+- Loads nearby reports around the current location.
+- Includes emergency-contact quick actions.
 
-## Use Cases
-- **Late-night travel**: to find the safest route for her late-night travel, avoiding high-crime areas.
-- **Incident Reporting**: After completing the journey, a user reports an unsafe area due to an incident or crime witnessed, helping future travelers.
-- **Daily Commute**: A person uses the app daily to ensure that he/she follows the safest route to and from work.
-- **Group Outing**: a person uses the app to plan the safest path for their outing, avoiding risky areas.
+## Current Architecture
+
+- Frontend: HTML, CSS, vanilla JavaScript
+- Mapping: Leaflet + Leaflet Routing Machine
+- Geocoding: OpenCage API
+- Authentication: Firebase Auth (client + admin token verification)
+- Backend API: Node.js + Express
+- Database: MongoDB (via Mongoose)
+
+## Project Structure
+
+- `index.html`: Main dashboard page
+- `login.html` and `signup.html`: Auth pages
+- `scripts.js`: Frontend app logic (routing, geocoding, reporting, SOS)
+- `styles.css`: Styling
+- `app.js`: Express API server and static file host
+- `safety_scores.json`: Safety score dataset used by the map UI
+- `firebase-service-account.json`: Optional Firebase Admin credentials for backend
+
+## Prerequisites
+
+- Node.js 18+
+- npm
+- A MongoDB connection string
+- Firebase project (for user authentication)
+
+## Environment Variables
+
+Create a `.env` file in the project root:
+
+```env
+MONGO_URI=your_mongodb_connection_string
+PORT=3000
+# Optional if not using firebase-service-account.json file
+FIREBASE_SERVICE_ACCOUNT_JSON={"type":"service_account",...}
+```
+
+Notes:
+- If `firebase-service-account.json` exists in the root, backend uses that first.
+- Otherwise backend falls back to `FIREBASE_SERVICE_ACCOUNT_JSON`, then application default credentials.
+
+## Installation
+
+```bash
+npm install
+```
+
+## Run Locally
+
+```bash
+node app.js
+```
+
+Then open:
+
+- `http://localhost:3000`
+
+## API Endpoints
+
+Base URL: `http://localhost:3000`
+
+- `POST /api/sync-user` (auth required)
+	- Upserts user profile from Firebase identity.
+- `POST /api/logout` (auth required)
+	- Revokes Firebase refresh tokens for the user.
+- `POST /api/reports` (auth required)
+	- Creates incident report.
+	- Rate limit: max 3 reports per hour per user.
+- `GET /api/reports`
+	- Gets recent reports (supports `limit`).
+- `GET /api/reports/nearby?lat={lat}&lng={lng}&radius={km}&limit={n}`
+	- Gets reports within distance radius.
+- `GET /api/my-reports` (auth required)
+	- Gets reports created by authenticated user.
+
+Auth header format:
+
+```http
+Authorization: Bearer <firebase_id_token>
+```
+
+## Frontend Behavior Notes
+
+- The app sets API base automatically:
+	- If opened from `file://` or non-3000 port, it defaults to `http://localhost:3000`.
+	- Can be overridden with `localStorage.apiBaseUrl`.
+- Nearby reports are fetched around live location (default radius 50 km).
+- Safety score markers are loaded from `safety_scores.json`.
+
+## Security and Cleanup Recommendations
+
+- Move hard-coded client API keys (for OpenCage/Firebase config) into a safer configuration flow.
+- Do not commit real service-account keys to public repositories.
+
+
+## Troubleshooting
+
+- If reports fail to load, confirm backend is running on port 3000.
+- If login works but API calls fail with 401, check Firebase ID token presence in local storage.
+- If Mongo connection fails, verify `MONGO_URI` in `.env`.
+
+## License
+
+ISC
